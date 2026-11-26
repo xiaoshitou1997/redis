@@ -53,12 +53,15 @@ public class CRC16 {
     }
 
     public static int keyHashSlot(String key) {
+        // Redis Cluster spec: tag = substring between the first '{' and the
+        // first '}' AFTER it; empty tag or missing braces hash the whole key.
         int start = key.indexOf('{');
-        int end = key.indexOf('}');
-
-        if (start != -1 && end != -1 && end > start + 1) {
-            String hashTag = key.substring(start + 1, end);
-            return crc16(hashTag) % ClusterSlot.TOTAL_SLOTS;
+        if (start != -1) {
+            int end = key.indexOf('}', start + 1);
+            if (end > start + 1) {
+                String hashTag = key.substring(start + 1, end);
+                return crc16(hashTag) % ClusterSlot.TOTAL_SLOTS;
+            }
         }
 
         return crc16(key) % ClusterSlot.TOTAL_SLOTS;
