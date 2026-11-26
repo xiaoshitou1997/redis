@@ -1,8 +1,13 @@
 package io.github.redis.handler;
 
+import io.github.redis.acl.AclManager;
+import io.github.redis.cluster.CRC16;
+import io.github.redis.cluster.ClusterManager;
+import io.github.redis.cluster.ClusterNode;
 import io.github.redis.command.CommandFlag;
 import io.github.redis.command.CommandTable;
 import io.github.redis.command.RedisCommand;
+import io.github.redis.replication.ReplicationManager;
 import io.github.redis.core.CommandDispatcher;
 import io.github.redis.core.RedisClient;
 import io.github.redis.observability.ServerMetrics;
@@ -14,6 +19,7 @@ import io.netty.handler.codec.redis.ArrayRedisMessage;
 import io.netty.handler.codec.redis.ErrorRedisMessage;
 import io.netty.handler.codec.redis.FullBulkStringRedisMessage;
 import io.netty.handler.codec.redis.InlineCommandRedisMessage;
+import io.netty.handler.codec.redis.IntegerRedisMessage;
 import io.netty.handler.codec.redis.RedisMessage;
 import io.netty.handler.codec.redis.SimpleStringRedisMessage;
 import io.netty.util.CharsetUtil;
@@ -118,14 +124,15 @@ public class CommandParser extends ChannelInboundHandlerAdapter {
         client.setCommand(argv, argv.length);
 
         // ACL enforcement: AUTH/HELLO/RESET/PING are always allowed so a client
-        // can authenticate. Everything else requires an authenticated user.
+        // can authenticate. Everything else requires an authenticated user and
+        // the command must be in the user's allowed set (Redis: NOAUTH / NOPERM).
         if (!isAuthBypassed(name)) {
-            io.github.redis.acl.AclManager acl = client.acl();
+            AclManager acl = client.acl();
             if (acl != null && acl.isEnabled()) {
                 String user = client.authenticatedUser();
                 if (user == null) {
                     // Default user — if it has no password set, allow; otherwise NOAUTH.
-                    io.github.redis.acl.AclManager.RedisUser def = acl.getUser("default");
+                    AclManager.RedisUser def = acl.getUser("default");
                     boolean needsAuth = def != null && !def.isNoPassword()
                             && def.getPassword() != null;
                     if (needsAuth) {
@@ -133,20 +140,27 @@ public class CommandParser extends ChannelInboundHandlerAdapter {
                         return;
                     }
                 }
+                // Command-level permission. Default setups grant "+@all" to the
+                // default user, so only explicitly restricted users are affected.
+                AclManager.RedisUser permitted = acl.getUser(user);
+                if (permitted != null && !acl.checkCommandPermission(permitted, name)) {
+                    replyError(client, "NOPERM User " + (user == null ? "default" : user)
+                            + " is not allowed to execute the '" + name.toLowerCase() + "' command");
+                    return;
+                }
             }
         }
 
         // Cluster MOVED redirect: when cluster is enabled and the command's
         // key(s) don't hash to a slot owned by this node, reply with a MOVED
         // error so the client can retry against the right node.
-        io.github.redis.cluster.ClusterManager cm =
-                client.services().get(io.github.redis.cluster.ClusterManager.class);
+        ClusterManager cm = client.services().get(ClusterManager.class);
         if (cm != null && cm.isClusterEnabled() && !cmd.getKeySpecs().isEmpty()) {
             List<String> keys = cmd.extractKeys(argv, argv.length);
             for (String key : keys) {
-                int slot = io.github.redis.cluster.CRC16.keyHashSlot(key);
+                int slot = CRC16.keyHashSlot(key);
                 if (!cm.isMySlot(slot)) {
-                    io.github.redis.cluster.ClusterNode owner = cm.getNodeForSlot(slot);
+                    ClusterNode owner = cm.getNodeForSlot(slot);
                     String addr = (owner == null) ? "0.0.0.0:0" : owner.getAddress();
                     replyError(client, "MOVED " + slot + " " + addr);
                     return;
@@ -177,8 +191,7 @@ public class CommandParser extends ChannelInboundHandlerAdapter {
             }
             // Replication: forward successful writes to replicas (when this server is a master).
             if (cmd.hasFlag(CommandFlag.WRITE) && !client.isReplica()) {
-                io.github.redis.replication.ReplicationManager rm =
-                        client.services().get(io.github.redis.replication.ReplicationManager.class);
+                ReplicationManager rm = client.services().get(ReplicationManager.class);
                 if (rm != null && !rm.isReplica()) {
                     rm.propagate(toTokenList(argv));
                 }
@@ -251,8 +264,8 @@ public class CommandParser extends ChannelInboundHandlerAdapter {
         if (msg instanceof SimpleStringRedisMessage) {
             return ((SimpleStringRedisMessage) msg).content();
         }
-        if (msg instanceof io.netty.handler.codec.redis.IntegerRedisMessage) {
-            return Long.toString(((io.netty.handler.codec.redis.IntegerRedisMessage) msg).value());
+        if (msg instanceof IntegerRedisMessage) {
+            return Long.toString(((IntegerRedisMessage) msg).value());
         }
         return null;
     }

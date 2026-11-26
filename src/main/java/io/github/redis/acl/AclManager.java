@@ -133,7 +133,7 @@ public class AclManager {
             return false;
         }
 
-        return verifyPassword(password, user.getPassword());
+        return verifyPassword(user, password);
     }
 
     public boolean checkCommandPermission(RedisUser user, String command) {
@@ -175,7 +175,7 @@ public class AclManager {
     }
 
     public Map<String, RedisUser.UserInfo> getUserList() {
-        Map<String, RedisUser.UserInfo> result = new HashMap();
+        Map<String, RedisUser.UserInfo> result = new HashMap<>();
 
         for (Map.Entry<String, RedisUser> entry : users.entrySet()) {
             result.put(entry.getKey(), entry.getValue().getUserInfo());
@@ -185,7 +185,9 @@ public class AclManager {
     }
 
     public String generatePassword() {
-        return Long.toHexString(System.currentTimeMillis());
+        // Cryptographically random 256-bit password (ACL GENPASS semantics) —
+        // a timestamp-derived value would be predictable.
+        return PasswordHasher.generateRandom();
     }
 
     private String hashPassword(String password) {
@@ -193,14 +195,21 @@ public class AclManager {
         return PasswordHasher.hashCleartext(password);
     }
 
-    private boolean verifyPassword(String password, String hashedPassword) {
-        // hashedPassword may be either the legacy "<hashCode>:<plain>" form
-        // (kept for backward compat with previously-saved state) or the new
-        // SHA256 hex form. Try both.
-        if (PasswordHasher.verify(password, hashedPassword)) return true;
-        // Legacy fallback.
-        String legacy = password.hashCode() + ":" + password;
-        return legacy.equals(hashedPassword);
+    private boolean verifyPassword(RedisUser user, String password) {
+        // storedPassword may be the SHA256 hex form (current) or the legacy
+        // "<hashCode>:<cleartext>" form left over from older saved state.
+        // Legacy entries upgrade in place to SHA256 on the first successful
+        // auth, so no plaintext survives in stored state afterwards.
+        String stored = user.getPassword();
+        if (PasswordHasher.verify(password, stored)) return true;
+        if (stored != null) {
+            String legacy = password.hashCode() + ":" + password;
+            if (PasswordHasher.constantTimeEquals(legacy, stored)) {
+                user.setPassword(hashPassword(password));
+                return true;
+            }
+        }
+        return false;
     }
 
     private void addCommandGroup(RedisUser user, String group) {
@@ -227,6 +236,9 @@ public class AclManager {
 
     private Map<String, List<String>> getCommandGroups() {
         Map<String, List<String>> groups = new HashMap<>();
+
+        // All commands (+@all)
+        groups.put("all", Arrays.asList("*"));
 
         // Admin commands
         groups.put("admin", Arrays.asList(
@@ -259,8 +271,7 @@ public class AclManager {
         private volatile boolean enabled;
         private volatile String password;
         private volatile boolean noPassword;
-        private volatile boolean passwordverifiable;
-        
+
         // Permissions
         private final Set<String> allowedCommands = ConcurrentHashMap.newKeySet();
         private final Set<String> deniedCommands = ConcurrentHashMap.newKeySet();

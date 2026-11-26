@@ -71,7 +71,8 @@ public final class PasswordHasher {
         return new String(out);
     }
 
-    private static boolean constantTimeEquals(String a, String b) {
+    /** Constant-time equality for stored-secret comparisons. */
+    public static boolean constantTimeEquals(String a, String b) {
         if (a.length() != b.length()) return false;
         int diff = 0;
         for (int i = 0; i < a.length(); i++) diff |= a.charAt(i) ^ b.charAt(i);
