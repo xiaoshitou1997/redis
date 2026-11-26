@@ -62,7 +62,28 @@ public final class SkipList {
      * false if an existing one was updated in place.
      */
     public boolean insert(String member, double score) {
-        @SuppressWarnings("unchecked")
+        // The list is ordered by (score, member), so member lookup cannot ride
+        // the ordered descent without knowing the member's score — resolve it
+        // with a bottom-level scan first. (The caller's dict enforces member
+        // uniqueness; keeping the list unique too makes deletes unambiguous.)
+        Double existingScore = findScoreLinear(member);
+        if (existingScore != null) {
+            deleteAt(member, existingScore);
+        }
+        insertNew(member, score, findUpdate(score, member));
+        return existingScore == null;
+    }
+
+    /** Linear bottom-level scan for {@code member}'s score, or null. */
+    private Double findScoreLinear(String member) {
+        for (Node x = header.forward[0]; x != null; x = x.forward[0]) {
+            if (member.equals(x.member)) return x.score;
+        }
+        return null;
+    }
+
+    /** Predecessor walk ordered by (score, member). */
+    private Node[] findUpdate(double score, String member) {
         Node[] update = new Node[MAX_LEVEL];
         Node x = header;
         for (int i = level - 1; i >= 0; i--) {
@@ -71,18 +92,7 @@ public final class SkipList {
             }
             update[i] = x;
         }
-        Node next = x.forward[0];
-
-        // Existing member?
-        if (next != null && next.member != null && next.member.equals(member)) {
-            // Update in place — but we may need to move the node if the new score
-            // changes ordering. Simplest correct path: delete and reinsert.
-            deleteNoLookup(member);
-            insertNew(member, score, update);
-            return false;
-        }
-        insertNew(member, score, update);
-        return true;
+        return update;
     }
 
     private void insertNew(String member, double score, Node[] update) {
@@ -101,31 +111,25 @@ public final class SkipList {
 
     /** Remove member. Returns true if found & removed. */
     public boolean delete(String member) {
-        return deleteNoLookup(member);
+        Double score = findScoreLinear(member);
+        if (score == null) return false;
+        deleteAt(member, score);
+        return true;
     }
 
-    private boolean deleteNoLookup(String member) {
-        @SuppressWarnings("unchecked")
-        Node[] update = new Node[MAX_LEVEL];
-        Node x = header;
-        for (int i = level - 1; i >= 0; i--) {
-            while (x.forward[i] != null
-                    && (x.forward[i].score < Double.POSITIVE_INFINITY
-                        ? compareMember(x.forward[i], member) < 0
-                        : false)) {
-                x = x.forward[i];
-            }
-            update[i] = x;
+    /** Ordered unlink of the node holding (member, score). */
+    private void deleteAt(String member, double score) {
+        Node[] update = findUpdate(score, member);
+        Node target = update[0].forward[0];
+        if (target == null || !member.equals(target.member) || target.score != score) {
+            return; // defensive: the score came from this same list
         }
-        Node target = x.forward[0];
-        if (target == null || !member.equals(target.member)) return false;
         for (int i = 0; i < level; i++) {
             if (update[i].forward[i] != target) break;
             update[i].forward[i] = target.forward[i];
         }
         while (level > 1 && header.forward[level - 1] == null) level--;
         length--;
-        return true;
     }
 
     private int compare(Node n, double score, String member) {
@@ -134,49 +138,18 @@ public final class SkipList {
         return n.member.compareTo(member);
     }
 
-    private int compareMember(Node n, String member) {
-        // Used during delete-by-member walk; we compare (score unknown) so we
-        // approximate by member order only at the bottom level (which is fully
-        // sorted by member when scores tie — but for different scores we may
-        // stop too early). The skiplist is only used when member uniqueness is
-        // already enforced by the caller's dict, so this is correct as a
-        // worst-case O(N) fallback.
-        if (n.member == null) return -1;
-        return n.member.compareTo(member);
-    }
-
     /** Get the score for a member, or NaN if not present. */
     public double score(String member) {
-        Node x = header;
-        for (int i = level - 1; i >= 0; i--) {
-            while (x.forward[i] != null && compareMember(x.forward[i], member) < 0) {
-                x = x.forward[i];
-            }
-        }
-        Node candidate = x.forward[0];
-        if (candidate != null && candidate.member != null && candidate.member.equals(member)) {
-            return candidate.score;
-        }
-        return Double.NaN;
+        Double s = findScoreLinear(member);
+        return s == null ? Double.NaN : s;
     }
 
     /** Returns the 0-based rank of a member, or -1 if not present. */
     public long rank(String member) {
+        // The list is ordered by (score, member) while rank is member-keyed, so
+        // ordered descent cannot skip by member — walk the bottom level.
         long rank = 0;
-        Node x = header;
-        for (int i = level - 1; i >= 0; i--) {
-            while (x.forward[i] != null && compareMember(x.forward[i], member) < 0) {
-                rank += (1L << i);
-                x = x.forward[i];
-            }
-        }
-        // x.forward[0] is the candidate (because compareMember uses member-only
-        // comparison). But since the skiplist is sorted by (score, member), the
-        // member-only comparison may have skipped past nodes with different
-        // scores — so rank is approximate. For correctness we fall back to a
-        // linear walk on the bottom level.
-        rank = 0;
-        x = header.forward[0];
+        Node x = header.forward[0];
         while (x != null) {
             if (x.member != null && x.member.equals(member)) return rank;
             rank++;
@@ -246,7 +219,7 @@ public final class SkipList {
             Node first = header.forward[0];
             if (first == null) break;
             out.add(new ScoreMemberPair(first.member, first.score));
-            deleteNoLookup(first.member);
+            delete(first.member);
         }
         return out;
     }
@@ -260,7 +233,7 @@ public final class SkipList {
         for (int i = all.size() - 1; i >= 0 && out.size() < count; i--) {
             ScoreMemberPair p = all.get(i);
             out.add(p);
-            deleteNoLookup(p.member);
+            delete(p.member);
         }
         return out;
     }

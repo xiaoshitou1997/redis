@@ -46,7 +46,11 @@ public final class IntSet {
         for (int b = 0; b < enc; b++) {
             v = (v << 8) | (data[off + b] & 0xFFL);
         }
-        return v;
+        // Sign-extend from the encoding width: 16/32-bit values do not reach
+        // the long sign bit, so negatives would otherwise read back as large
+        // positives and break ordering and lookup.
+        int shift = 64 - enc * 8;
+        return (v << shift) >> shift;
     }
 
     /** Sets the value at logical index {@code i} (assumes enc is already big enough). */
@@ -76,15 +80,16 @@ public final class IntSet {
         int oldEnc = enc;
         enc = newEnc;
         data = new byte[Math.max(size * enc, oldData.length / oldEnc * enc) + enc * 4];
-        // Re-insert each value (preserving sorted order — values are all positive
-        // after expansion OR all negative; either way monotonic).
+        // Re-insert each value in place; correct signed decoding (same rule as
+        // {@link #get(int)}) keeps the array sorted across the widening.
         for (int i = size - 1; i >= 0; i--) {
             long v = 0;
             int oldOff = i * oldEnc;
             for (int b = 0; b < oldEnc; b++) {
                 v = (v << 8) | (oldData[oldOff + b] & 0xFFL);
             }
-            set(i, v);
+            int shift = 64 - oldEnc * 8;
+            set(i, (v << shift) >> shift);
         }
     }
 
