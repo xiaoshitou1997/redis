@@ -3,11 +3,15 @@ package io.github.redis.command.handler;
 import io.github.redis.core.RedisClient;
 import io.github.redis.persistence.PersistenceManager;
 import io.github.redis.persistence.rdb.RdbSaver;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 /**
  * Persistence commands: SAVE/BGSAVE/BGREWRITEAOF/LASTSAVE.
  */
 public final class PersistenceCommands {
+
+    private static final Logger log = LoggerFactory.getLogger(PersistenceCommands.class);
 
     private PersistenceCommands() {}
 
@@ -22,10 +26,12 @@ public final class PersistenceCommands {
             return;
         }
         boolean ok = saver.save();
-        c.replyOK();
-        if (!ok) {
-            // SAVE returns OK on success but reports failure via prior error log;
-            // Redis returns an error in that case. Phase 1 will tighten this.
+        if (ok) {
+            c.replyOK();
+        } else {
+            // Redis replies with an error when SAVE fails; the cause is in the log.
+            log.error("SAVE failed; replying error to client {}", c.channel().remoteAddress());
+            c.replyError("ERR Failed to save the RDB file");
         }
     }
 
@@ -43,22 +49,26 @@ public final class PersistenceCommands {
             return;
         }
         boolean started = saver.bgsave();
-        c.replyStatus(started ? "Background saving started" : "ERR Background save could not be started");
+        if (started) {
+            c.replyStatus("Background saving started");
+        } else {
+            c.replyError("ERR Background save could not be started");
+        }
     }
 
     public static void bgrewriteaof(RedisClient c) {
         PersistenceManager pm = c.services().get(PersistenceManager.class);
         if (pm == null) { c.replyError("ERR persistence subsystem unavailable"); return; }
         if (pm.isRewriteInProgress()) {
-            c.replyError("ERR AOF rewrite already in progress");
+            c.replyError("ERR Background append only rewriting already in progress");
             return;
         }
-        // Kick off asynchronously — the snapshot itself is taken on the
-        // dispatcher thread, but we don't block the client.
-        new Thread(() -> {
-            try { pm.rewriteAof(); }
-            catch (Exception e) { e.printStackTrace(); }
-        }, "aof-rewrite-trigger").start();
+        // Runs on the manager's dedicated single-thread rewriter; the snapshot
+        // is taken on the dispatcher thread inside the rewrite for consistency.
+        if (!pm.startRewrite()) {
+            c.replyError("ERR Append only rewriting is disabled or could not be started");
+            return;
+        }
         c.replyStatus("Background append only file rewriting started");
     }
 }

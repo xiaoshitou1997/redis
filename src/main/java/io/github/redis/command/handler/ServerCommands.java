@@ -3,6 +3,8 @@ package io.github.redis.command.handler;
 import io.github.redis.acl.AclManager;
 import io.github.redis.core.RedisClient;
 import io.github.redis.storage.StorageManager;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 /**
  * Server-level commands: PING/ECHO/SELECT/FLUSHDB/FLUSHALL/DBSIZE/AUTH/COMMAND/
@@ -13,6 +15,8 @@ import io.github.redis.storage.StorageManager;
  * come in Phase 1.
  */
 public final class ServerCommands {
+
+    private static final Logger log = LoggerFactory.getLogger(ServerCommands.class);
 
     private ServerCommands() {}
 
@@ -211,11 +215,19 @@ public final class ServerCommands {
 
     public static void shutdown(RedisClient c) {
         // Save and exit. We use System.exit since shutdown hook will call saveData.
-        System.out.println("SHUTDOWN requested by client " + c.channel().remoteAddress());
-        new Thread(() -> {
-            try { Thread.sleep(50); } catch (InterruptedException ignored) {}
+        log.info("SHUTDOWN requested by client {}", c.channel().remoteAddress());
+        // One-shot daemon thread is deliberate: the process is exiting and a
+        // pooled executor would only need to be torn down again.
+        Thread t = new Thread(() -> {
+            try {
+                Thread.sleep(50); // let the +OK reply flush
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+            }
             System.exit(0);
-        }, "redis-shutdown").start();
+        }, "redis-shutdown");
+        t.setDaemon(true);
+        t.start();
         c.replyOK();
     }
 }

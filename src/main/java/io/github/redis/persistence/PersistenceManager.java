@@ -14,6 +14,11 @@ import io.github.redis.storage.StorageManager;
 
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 /**
@@ -31,6 +36,8 @@ import java.util.concurrent.atomic.AtomicBoolean;
  */
 public class PersistenceManager {
 
+    private static final Logger log = LoggerFactory.getLogger(PersistenceManager.class);
+
     private final RedisConfig config;
     private final StorageManager storageManager;
     private final CommandTable commandTable;
@@ -43,6 +50,7 @@ public class PersistenceManager {
     private CommandDispatcher dispatcher;
 
     private final AtomicBoolean rewriteInProgress = new AtomicBoolean(false);
+    private ExecutorService rewriteExecutor;
 
     public PersistenceManager(RedisConfig config, StorageManager storageManager,
                               CommandTable commandTable, ServiceRegistry serviceRegistry) {
@@ -63,7 +71,7 @@ public class PersistenceManager {
 
         persistenceListener = new PersistenceListener(aofWriter, rdbSaver, commandTable);
 
-        System.out.println("Persistence manager initialized");
+        log.info("Persistence manager initialized");
     }
 
     public void setDispatcher(CommandDispatcher dispatcher) {
@@ -80,8 +88,7 @@ public class PersistenceManager {
             try {
                 loaded = aofReader.replay(config);
             } catch (Exception e) {
-                System.err.println("AOF replay failed: " + e.getMessage());
-                e.printStackTrace();
+                log.error("AOF replay failed", e);
             }
         }
 
@@ -90,19 +97,19 @@ public class PersistenceManager {
         }
 
         if (!loaded) {
-            System.out.println("No persistence file found, starting with empty database");
+            log.info("No persistence file found, starting with empty database");
         }
     }
 
     public void saveData() {
-        System.out.println("Saving data before shutdown...");
+        log.info("Saving data before shutdown...");
         if (aofWriter != null && aofWriter.isEnabled()) aofWriter.forceSync();
         if (rdbSaver != null) {
             // SAVE on shutdown can run on the dispatcher thread (single thread
             // blocking for a few ms is fine for an orderly shutdown).
             rdbSaver.save();
         }
-        System.out.println("Data saved successfully");
+        log.info("Data saved successfully");
     }
 
     public PersistenceListener getPersistenceListener() {
@@ -113,16 +120,43 @@ public class PersistenceManager {
     public AofWriter getAofWriter() { return aofWriter; }
 
     /**
-     * Rewrite the AOF from current state. Snapshot is taken on the dispatcher
-     * thread for consistency; encoding and file replacement happen in-line
-     * (the rewritten bytes are buffered first).
+     * Rewrite the AOF from current state, synchronously. Snapshot is taken on
+     * the dispatcher thread for consistency; encoding and file replacement
+     * happen in-line (the rewritten bytes are buffered first).
      *
      * @return true on success
      */
     public boolean rewriteAof() {
-        if (!aofWriter.isEnabled()) return false;
+        if (aofWriter == null || !aofWriter.isEnabled()) return false;
         if (!rewriteInProgress.compareAndSet(false, true)) return false;
+        try {
+            return doRewriteAof();
+        } finally {
+            rewriteInProgress.set(false);
+        }
+    }
 
+    /**
+     * Kick off a background AOF rewrite on the dedicated rewriter thread
+     * (BGREWRITEAOF). Fails fast when a rewrite is already running or AOF is
+     * disabled; the completion flag is cleared on the rewriter thread.
+     *
+     * @return true if the rewrite was started
+     */
+    public synchronized boolean startRewrite() {
+        if (aofWriter == null || !aofWriter.isEnabled()) return false;
+        if (!rewriteInProgress.compareAndSet(false, true)) return false;
+        ensureRewriteExecutor().execute(() -> {
+            try {
+                doRewriteAof();
+            } finally {
+                rewriteInProgress.set(false);
+            }
+        });
+        return true;
+    }
+
+    private boolean doRewriteAof() {
         try {
             // 1. Snapshot on dispatcher thread.
             Storage[] storages = getAllStorages();
@@ -144,12 +178,20 @@ public class PersistenceManager {
             aofWriter.rewriteFrom(new ByteArrayInputStream(bytes));
             return true;
         } catch (Exception e) {
-            System.err.println("AOF rewrite failed: " + e.getMessage());
-            e.printStackTrace();
+            log.error("AOF rewrite failed", e);
             return false;
-        } finally {
-            rewriteInProgress.set(false);
         }
+    }
+
+    private synchronized ExecutorService ensureRewriteExecutor() {
+        if (rewriteExecutor == null || rewriteExecutor.isShutdown()) {
+            rewriteExecutor = Executors.newSingleThreadExecutor(r -> {
+                Thread t = new Thread(r, "redis-aof-rewriter");
+                t.setDaemon(true);
+                return t;
+            });
+        }
+        return rewriteExecutor;
     }
 
     public boolean isRewriteInProgress() {
@@ -163,8 +205,9 @@ public class PersistenceManager {
     }
 
     public void shutdown() {
+        if (rewriteExecutor != null && !rewriteExecutor.isShutdown()) rewriteExecutor.shutdownNow();
         if (aofWriter != null) aofWriter.shutdown();
         if (rdbSaver != null)  rdbSaver.shutdown();
-        System.out.println("Persistence manager shut down");
+        log.info("Persistence manager shut down");
     }
 }
