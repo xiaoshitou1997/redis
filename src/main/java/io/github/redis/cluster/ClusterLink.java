@@ -10,11 +10,15 @@ import io.netty.handler.codec.redis.RedisBulkStringAggregator;
 import io.netty.handler.codec.redis.RedisArrayAggregator;
 import io.netty.handler.codec.redis.RedisDecoder;
 import io.netty.util.concurrent.DefaultThreadFactory;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import java.net.InetSocketAddress;
 import java.util.concurrent.TimeUnit;
 
 public class ClusterLink {
+
+    private static final Logger log = LoggerFactory.getLogger(ClusterLink.class);
 
     private final ClusterNode remoteNode;
     private final ClusterNode localNode;
@@ -62,18 +66,18 @@ public class ClusterLink {
                 channel = future.channel();
                 connected = true;
                 reconnecting = false;
-                System.out.println("Cluster link established: " + localNode.getAddress() + " -> " + remoteNode.getAddress());
+                log.info("Cluster link established: {} -> {}", localNode.getAddress(), remoteNode.getAddress());
                 
                 channel.closeFuture().addListener((ChannelFuture closeFuture) -> {
                     connected = false;
-                    System.out.println("Cluster link closed: " + remoteNode.getAddress());
+                    log.info("Cluster link closed: {}", remoteNode.getAddress());
                     scheduleReconnect();
                 });
             } else {
                 connected = false;
                 reconnecting = false;
-                System.err.println("Failed to connect to cluster node: " + remoteNode.getAddress() + 
-                                 ", error: " + future.cause().getMessage());
+                log.error("Failed to connect to cluster node: {}, error: {}",
+                        remoteNode.getAddress(), future.cause().getMessage());
                 scheduleReconnect();
             }
         });
@@ -97,7 +101,7 @@ public class ClusterLink {
 
     public void sendMessage(ClusterMessage message) {
         if (!connected || channel == null || !channel.isActive()) {
-            System.err.println("Cannot send message to " + remoteNode.getAddress() + ": not connected");
+            log.warn("Cannot send message to {}: not connected", remoteNode.getAddress());
             return;
         }
 

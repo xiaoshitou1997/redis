@@ -4,6 +4,8 @@ import io.github.redis.config.RedisConfig;
 import io.github.redis.core.CommandDispatcher;
 import io.github.redis.storage.Storage;
 import io.github.redis.storage.StorageManager;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import java.io.FileInputStream;
 import java.io.FileOutputStream;
@@ -34,6 +36,8 @@ import java.util.concurrent.atomic.AtomicLong;
  * for crash recovery (the temp file is fully written before the move).
  */
 public class RdbSaver {
+
+    private static final Logger log = LoggerFactory.getLogger(RdbSaver.class);
 
     private final StorageManager storageManager;
     private final RedisConfig config;
@@ -68,8 +72,7 @@ public class RdbSaver {
         scheduler.scheduleAtFixedRate(() -> {
             try { checkAndSave(); }
             catch (Exception e) {
-                System.err.println("Error in periodic RDB save: " + e.getMessage());
-                e.printStackTrace();
+                log.error("Error in periodic RDB save", e);
             }
         }, 1, 1, TimeUnit.SECONDS);
     }
@@ -113,7 +116,7 @@ public class RdbSaver {
             final StorageSnapshot snap = snapshotNow();
             scheduler.execute(() -> {
                 try { doSaveWithSnapshot(snap); }
-                catch (Exception e) { e.printStackTrace(); }
+                catch (Exception e) { log.error("Background RDB save failed", e); }
                 finally { savingInProgress.set(false); }
             });
             return true;
@@ -127,7 +130,7 @@ public class RdbSaver {
 
         scheduler.execute(() -> {
             try { doSaveWithSnapshot(snap); }
-            catch (Exception e) { e.printStackTrace(); }
+            catch (Exception e) { log.error("Background RDB save failed", e); }
             finally { savingInProgress.set(false); }
         });
         return true;
@@ -161,11 +164,10 @@ public class RdbSaver {
 
             lastSaveTime.set(System.currentTimeMillis());
             changesSinceLastSave.set(0);
-            System.out.println("RDB saved successfully to: " + filePath);
+            log.info("RDB saved successfully to: {}", filePath);
             return true;
         } catch (IOException e) {
-            System.err.println("Failed to save RDB: " + e.getMessage());
-            e.printStackTrace();
+            log.error("Failed to save RDB", e);
             return false;
         }
     }
@@ -174,17 +176,16 @@ public class RdbSaver {
         try {
             Path filePath = Paths.get(config.getDir(), config.getDbfilename());
             if (!Files.exists(filePath)) {
-                System.out.println("RDB file not found: " + filePath);
+                log.info("RDB file not found: {}", filePath);
                 return false;
             }
             try (FileInputStream fis = new FileInputStream(filePath.toFile())) {
                 decoder.decode(fis, getAllStorages());
             }
-            System.out.println("RDB loaded successfully from: " + filePath);
+            log.info("RDB loaded successfully from: {}", filePath);
             return true;
         } catch (IOException e) {
-            System.err.println("Failed to load RDB: " + e.getMessage());
-            e.printStackTrace();
+            log.error("Failed to load RDB", e);
             return false;
         }
     }

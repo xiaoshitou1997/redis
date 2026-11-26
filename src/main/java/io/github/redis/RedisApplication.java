@@ -4,6 +4,9 @@ import io.github.redis.bootstrap.Redis;
 import io.github.redis.config.ConfigLoader;
 import io.github.redis.config.RedisConfig;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
 import java.io.File;
 
 /**
@@ -11,6 +14,8 @@ import java.io.File;
  * Starts Redis server
  */
 public class RedisApplication {
+
+    private static final Logger log = LoggerFactory.getLogger(RedisApplication.class);
 
     /**
      * Main method
@@ -35,14 +40,14 @@ public class RedisApplication {
             try {
                 port = Integer.parseInt(args[2]);
             } catch (NumberFormatException e) {
-                System.err.println("Invalid port number: " + args[2]);
+                log.error("Invalid port number: {}", args[2]);
                 System.exit(1);
             }
         }
 
-        System.out.println("Starting Redis server on " + host + ":" + port);
-        System.out.println("Configuration loaded: databases=" + config.getDatabases() +
-                ", maxmemory=" + config.getMaxMemory());
+        log.info("Starting Redis server on {}:{}", host, port);
+        log.info("Configuration loaded: databases={}, maxmemory={}",
+                config.getDatabases(), config.getMaxMemory());
 
         Redis redis = new Redis(host, port, config);
 
@@ -79,16 +84,16 @@ public class RedisApplication {
 
         if (configPath != null) {
             try {
-                System.out.println("Loading configuration from: " + configPath);
+                log.info("Loading configuration from: {}", configPath);
                 return ConfigLoader.loadFromFile(configPath);
             } catch (Exception e) {
-                System.err.println("Warning: Failed to load config file: " + configPath);
-                System.err.println("Using default configuration. Error: " + e.getMessage());
+                log.warn("Failed to load config file: {}; using default configuration. Error: {}",
+                        configPath, e.getMessage());
             }
         }
 
         // Use default configuration
-        System.out.println("Using default configuration");
+        log.info("Using default configuration");
         return ConfigLoader.createDefault();
     }
 }

@@ -29,6 +29,9 @@ import io.netty.handler.ssl.SslHandler;
 
 import javax.net.ssl.SSLEngine;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
 import java.util.UUID;
 
 /**
@@ -40,6 +43,8 @@ import java.util.UUID;
  * (it logged every byte, killing QPS).
  */
 public class RedisInitializer extends ChannelInitializer<SocketChannel> {
+
+    private static final Logger log = LoggerFactory.getLogger(RedisInitializer.class);
 
     private final CommandTable commandTable;
     private final CommandParser commandParser;
@@ -134,10 +139,9 @@ public class RedisInitializer extends ChannelInitializer<SocketChannel> {
         if (config.isTlsEnabled()) {
             try {
                 ssl = TlsFactory.buildServerContext(config);
-                System.out.println("TLS enabled on data port " + config.getPort());
+                log.info("TLS enabled on data port {}", config.getPort());
             } catch (javax.net.ssl.SSLException e) {
-                System.err.println("Failed to build SSL context: " + e.getMessage());
-                e.printStackTrace();
+                log.error("Failed to build SSL context", e);
             }
         }
         this.sslContext = ssl;

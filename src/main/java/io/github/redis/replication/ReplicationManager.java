@@ -23,6 +23,8 @@ import io.netty.handler.codec.redis.RedisEncoder;
 import io.netty.handler.codec.redis.RedisMessage;
 import io.netty.util.CharsetUtil;
 import io.netty.util.concurrent.DefaultThreadFactory;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import java.net.InetSocketAddress;
 import java.util.List;
@@ -46,6 +48,8 @@ import io.github.redis.core.ServiceRegistry;
  * machinery (Phase 7 territory).
  */
 public final class ReplicationManager {
+
+    private static final Logger log = LoggerFactory.getLogger(ReplicationManager.class);
 
     /** Set when this server is a replica. */
     private volatile boolean isReplica = false;
@@ -127,11 +131,11 @@ public final class ReplicationManager {
                 });
         try {
             ChannelFuture f = b.bind(new InetSocketAddress(bindHost, replicationPort)).sync();
-            System.out.println("Replication listener started on " + bindHost + ":" + replicationPort);
+            log.info("Replication listener started on {}:{}", bindHost, replicationPort);
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
         } catch (Exception e) {
-            System.err.println("Failed to start replication listener on port " + replicationPort + ": " + e.getMessage());
+            log.error("Failed to start replication listener on port {}", replicationPort, e);
         }
     }
 
@@ -209,8 +213,7 @@ public final class ReplicationManager {
 
         @Override
         public void exceptionCaught(ChannelHandlerContext ctx, Throwable cause) {
-            // Phase-6 simplification: log and move on.
-            cause.printStackTrace();
+            log.error("Replication channel error", cause);
         }
     }
 }

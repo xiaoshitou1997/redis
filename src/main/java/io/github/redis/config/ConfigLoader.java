@@ -8,11 +8,16 @@ import java.util.List;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
 /**
  * 配置文件加载器
  * 支持加载redis.conf格式的配置文件
  */
 public class ConfigLoader {
+
+    private static final Logger log = LoggerFactory.getLogger(ConfigLoader.class);
 
     private static final Pattern COMMENT_PATTERN = Pattern.compile("^\\s*#");
     private static final Pattern CONFIG_PATTERN = Pattern.compile("^\\s*([\\w-]+)\\s+(.+)$");
@@ -101,8 +106,8 @@ public class ConfigLoader {
         try {
             parseConfigKey(key, value, config);
         } catch (Exception e) {
-            // 忽略无法解析的配置项
-            System.err.println("Warning: Failed to parse config line: " + line + " - " + e.getMessage());
+            // 忽略无法解析的配置项（Redis 对坏配置行同样只告警并继续）
+            log.warn("Failed to parse config line: {} - {}", line, e.getMessage());
         }
     }
 
@@ -227,7 +232,8 @@ public class ConfigLoader {
                 break;
 
             default:
-                // 忽略未知配置项
+                // 未知配置项：告警并忽略（Redis 对未知指令同样打日志后跳过）
+                log.warn("Unknown config directive ignored: {}", key);
                 break;
         }
     }

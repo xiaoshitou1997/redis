@@ -1,6 +1,8 @@
 package io.github.redis.persistence.aof;
 
 import io.github.redis.config.RedisConfig;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import java.io.*;
 import java.nio.charset.StandardCharsets;
@@ -29,6 +31,8 @@ import java.util.concurrent.atomic.AtomicLong;
  * </ul>
  */
 public class AofWriter {
+
+    private static final Logger log = LoggerFactory.getLogger(AofWriter.class);
 
     private final RedisConfig config;
     private final AtomicBoolean enabled = new AtomicBoolean(false);
@@ -66,11 +70,10 @@ public class AofWriter {
             String fsyncStrategy = config.getAppendFsync();
             if ("everysec".equals(fsyncStrategy)) startPeriodicFsync();
 
-            System.out.println("AOF writer initialized: " + filePath + " (size=" + existing + ")");
+            log.info("AOF writer initialized: {} (size={})", filePath, existing);
             return true;
         } catch (IOException e) {
-            System.err.println("Failed to initialize AOF writer: " + e.getMessage());
-            e.printStackTrace();
+            log.error("Failed to initialize AOF writer", e);
             enabled.set(false);
             return false;
         }
@@ -92,8 +95,7 @@ public class AofWriter {
                     pendingFsync.set(true);
                 }
             } catch (IOException e) {
-                System.err.println("Failed to write command to AOF: " + e.getMessage());
-                e.printStackTrace();
+                log.error("Failed to write command to AOF", e);
             }
         }
     }
@@ -121,7 +123,7 @@ public class AofWriter {
                         if (fileOutputStream != null) fileOutputStream.getFD().sync();
                     }
                 } catch (IOException e) {
-                    System.err.println("Failed to fsync AOF file: " + e.getMessage());
+                    log.error("Failed to fsync AOF file", e);
                 }
             }
         }, 1, 1, TimeUnit.SECONDS);
@@ -135,7 +137,7 @@ public class AofWriter {
                 fileOutputStream.getFD().sync();
                 pendingFsync.set(false);
             } catch (IOException e) {
-                System.err.println("Failed to force sync AOF: " + e.getMessage());
+                log.error("Failed to force sync AOF", e);
             }
         }
     }
@@ -187,7 +189,7 @@ public class AofWriter {
             long newSize = Files.size(filePath);
             currentSizeBytes.set(newSize);
             rewriteBaseSize.set(newSize);
-            System.out.println("AOF rewrite complete; new size = " + newSize + " bytes");
+            log.info("AOF rewrite complete; new size = {} bytes", newSize);
         }
     }
 
@@ -216,7 +218,7 @@ public class AofWriter {
                     fileOutputStream.close();
                 }
             } catch (IOException e) {
-                System.err.println("Error closing AOF writer: " + e.getMessage());
+                log.error("Error closing AOF writer", e);
             }
         }
         if (fsyncScheduler != null && !fsyncScheduler.isShutdown()) {

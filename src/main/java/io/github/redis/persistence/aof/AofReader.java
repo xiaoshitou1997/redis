@@ -6,6 +6,8 @@ import io.github.redis.core.RedisClient;
 import io.github.redis.storage.StorageManager;
 import io.netty.channel.embedded.EmbeddedChannel;
 import io.netty.util.AttributeKey;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import java.io.BufferedInputStream;
 import java.io.BufferedReader;
@@ -34,6 +36,8 @@ import java.util.List;
  */
 public class AofReader {
 
+    private static final Logger log = LoggerFactory.getLogger(AofReader.class);
+
     private final CommandTable commandTable;
     private final StorageManager storageManager;
     private final io.github.redis.core.ServiceRegistry serviceRegistry;
@@ -54,7 +58,7 @@ public class AofReader {
 
         Path filePath = Paths.get(config.getDir(), config.getAppendFilename());
         if (!Files.exists(filePath)) {
-            System.out.println("AOF file not found: " + filePath);
+            log.info("AOF file not found: {}", filePath);
             return false;
         }
 
@@ -96,11 +100,11 @@ public class AofReader {
                 }
             }
         } catch (IOException e) {
-            System.err.println("AOF replay I/O error: " + e.getMessage());
+            log.error("AOF replay I/O error", e);
         }
 
-        System.out.println("AOF replay: " + applied + "/" + total + " commands applied ("
-                + skipped + " skipped) from " + filePath);
+        log.info("AOF replay: {}/{} commands applied ({} skipped) from {}",
+                applied, total, skipped, filePath);
         return applied > 0;
     }
 
@@ -162,12 +166,12 @@ public class AofReader {
         String name = tokens.get(0).toUpperCase();
         RedisCommand cmd = commandTable.get(name);
         if (cmd == null) {
-            System.err.println("AOF replay: unknown command '" + name + "' — skipped");
+            log.warn("AOF replay: unknown command '{}' — skipped", name);
             return false;
         }
         String[] argv = tokens.toArray(new String[0]);
         if (!cmd.checkArity(argv.length)) {
-            System.err.println("AOF replay: arity mismatch for '" + name + "' — skipped");
+            log.warn("AOF replay: arity mismatch for '{}' — skipped", name);
             return false;
         }
         client.setCommand(argv, argv.length);
@@ -175,7 +179,7 @@ public class AofReader {
             cmd.getHandler().execute(client);
             return true;
         } catch (RuntimeException e) {
-            System.err.println("AOF replay: command '" + name + "' failed: " + e.getMessage());
+            log.warn("AOF replay: command '{}' failed: {}", name, e.getMessage());
             return false;
         }
     }

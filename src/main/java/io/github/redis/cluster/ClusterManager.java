@@ -11,7 +11,7 @@ import java.util.concurrent.atomic.AtomicLong;
 
 public class ClusterManager {
 
-    private static final Logger logger = LoggerFactory.getLogger(ClusterManager.class);
+    private static final Logger log = LoggerFactory.getLogger(ClusterManager.class);
     
     private static volatile ClusterManager instance;
     
@@ -73,17 +73,17 @@ public class ClusterManager {
         scheduler.scheduleAtFixedRate(this::checkNodeFailures, 5, 5, TimeUnit.SECONDS);
         scheduler.scheduleAtFixedRate(this::updateClusterState, 10, 10, TimeUnit.SECONDS);
         
-        logger.info("Cluster manager started for node: {}", myself.getAddress());
+        log.info("Cluster manager started for node: {}", myself.getAddress());
     }
 
     public void enableCluster() {
         clusterEnabled.set(true);
-        logger.info("Cluster enabled for node: {}", myself.getAddress());
+        log.info("Cluster enabled for node: {}", myself.getAddress());
     }
 
     public void disableCluster() {
         clusterEnabled.set(false);
-        logger.info("Cluster disabled for node: {}", myself.getAddress());
+        log.info("Cluster disabled for node: {}", myself.getAddress());
     }
 
     public boolean isClusterEnabled() {
@@ -96,7 +96,7 @@ public class ClusterManager {
         }
         
         nodes.put(node.getNodeId(), node);
-        logger.info("Added cluster node: {}", node.getAddress());
+        log.info("Added cluster node: {}", node.getAddress());
         
         if (clusterEnabled.get() && !node.getNodeId().equals(myself.getNodeId())) {
             establishLink(node);
@@ -132,7 +132,7 @@ public class ClusterManager {
     public void markNodeAsFailed(String nodeId) {
         ClusterNode node = nodes.get(nodeId);
         if (node != null && !nodeId.equals(myself.getNodeId())) {
-            logger.warn("Marking node as failed: {}", node.getAddress());
+            log.warn("Marking node as failed: {}", node.getAddress());
             node.setConnected(false);
         }
     }
@@ -148,7 +148,7 @@ public class ClusterManager {
             slot.setOwnerNode(ownerNode);
             if (ownerNode != null) ownerNode.addSlot(slotId);
         } catch (Throwable t) {
-            logger.error("assignSlot failed for slot {} owner={}", slotId, ownerNode, t);
+            log.error("assignSlot failed for slot {} owner={}", slotId, ownerNode, t);
         }
     }
 
@@ -247,7 +247,7 @@ public class ClusterManager {
             if (!node.getNodeId().equals(myself.getNodeId())) {
                 long timeSinceLastPong = now - node.getPongReceived();
                 if (timeSinceLastPong > 30000 && node.isConnected()) {
-                    logger.warn("Node {} is not responding, marking as failed", node.getAddress());
+                    log.warn("Node {} is not responding, marking as failed", node.getAddress());
                     markNodeAsFailed(node.getNodeId());
                 }
             }
@@ -307,7 +307,7 @@ public class ClusterManager {
     }
 
     public void shutdown() {
-        logger.info("Shutting down cluster manager");
+        log.info("Shutting down cluster manager");
         
         for (ClusterNode node : nodes.values()) {
             if (node.getLink() != null) {

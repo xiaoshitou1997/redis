@@ -9,7 +9,7 @@ import java.util.List;
 
 public class ClusterMessageHandler extends SimpleChannelInboundHandler<List<String>> {
 
-    private static final Logger logger = LoggerFactory.getLogger(ClusterMessageHandler.class);
+    private static final Logger log = LoggerFactory.getLogger(ClusterMessageHandler.class);
     
     private final ClusterNode localNode;
     private final ClusterNode remoteNode;
@@ -25,14 +25,14 @@ public class ClusterMessageHandler extends SimpleChannelInboundHandler<List<Stri
     protected void channelRead0(ChannelHandlerContext ctx, List<String> command) {
         try {
             if (command.isEmpty() || !command.get(0).equalsIgnoreCase("CLUSTER")) {
-                logger.warn("Received non-cluster message from {}", remoteNode.getAddress());
+                log.warn("Received non-cluster message from {}", remoteNode.getAddress());
                 return;
             }
 
             ClusterMessage message = ClusterMessage.fromRedisCommand(command);
             handleClusterMessage(message);
         } catch (Exception e) {
-            logger.error("Error processing cluster message from {}: {}", remoteNode.getAddress(), e.getMessage(), e);
+            log.error("Error processing cluster message from {}: {}", remoteNode.getAddress(), e.getMessage(), e);
         }
     }
 
@@ -54,12 +54,12 @@ public class ClusterMessageHandler extends SimpleChannelInboundHandler<List<Stri
                 handleUpdate(message);
                 break;
             default:
-                logger.warn("Unhandled cluster message type: {}", message.getType());
+                log.warn("Unhandled cluster message type: {}", message.getType());
         }
     }
 
     private void handleMeet(ClusterMessage message) {
-        logger.info("Received MEET from {}", message.getSender().getAddress());
+        log.info("Received MEET from {}", message.getSender().getAddress());
         
         ClusterNode newNode = message.getSender();
         clusterManager.addNode(newNode);
@@ -68,7 +68,7 @@ public class ClusterMessageHandler extends SimpleChannelInboundHandler<List<Stri
     }
 
     private void handlePing(ClusterMessage message) {
-        logger.debug("Received PING from {}", message.getSender().getAddress());
+        log.debug("Received PING from {}", message.getSender().getAddress());
         
         ClusterNode sender = message.getSender();
         clusterManager.updateNode(sender);
@@ -81,7 +81,7 @@ public class ClusterMessageHandler extends SimpleChannelInboundHandler<List<Stri
     }
 
     private void handlePong(ClusterMessage message) {
-        logger.debug("Received PONG from {}", message.getSender().getAddress());
+        log.debug("Received PONG from {}", message.getSender().getAddress());
         
         ClusterNode sender = message.getSender();
         clusterManager.updateNode(sender);
@@ -94,14 +94,14 @@ public class ClusterMessageHandler extends SimpleChannelInboundHandler<List<Stri
     }
 
     private void handleFail(ClusterMessage message) {
-        logger.warn("Received FAIL for node: {}", message.getData());
+        log.warn("Received FAIL for node: {}", message.getData());
         
         String failedNodeId = message.getData();
         clusterManager.markNodeAsFailed(failedNodeId);
     }
 
     private void handleUpdate(ClusterMessage message) {
-        logger.debug("Received UPDATE from {}", message.getSender().getAddress());
+        log.debug("Received UPDATE from {}", message.getSender().getAddress());
         
         ClusterNode sender = message.getSender();
         clusterManager.updateNode(sender);
@@ -109,12 +109,12 @@ public class ClusterMessageHandler extends SimpleChannelInboundHandler<List<Stri
 
     @Override
     public void exceptionCaught(ChannelHandlerContext ctx, Throwable cause) {
-        logger.error("Exception in cluster link to {}: {}", remoteNode.getAddress(), cause.getMessage(), cause);
+        log.error("Exception in cluster link to {}: {}", remoteNode.getAddress(), cause.getMessage(), cause);
         ctx.close();
     }
 
     @Override
     public void channelInactive(ChannelHandlerContext ctx) {
-        logger.info("Cluster link to {} became inactive", remoteNode.getAddress());
+        log.info("Cluster link to {} became inactive", remoteNode.getAddress());
     }
 }
